@@ -5,6 +5,7 @@ import os
 import random
 from enum import Enum
 from typing import Literal
+import visualize
 
 import neat
 import pygame
@@ -109,12 +110,12 @@ class Trainer:
         # go down
         elif vertical_movement == 1:
             # going down from the bottom right corner is how the player escapes
+            # if (
+            #     current_x == self.game_grid_width - 1
+            #     and current_y < self.game_grid_height - 1
+            # ):
+            #     new_y += 1
             if (
-                current_x == self.game_grid_width - 1
-                and current_y < self.game_grid_height - 1
-            ):
-                new_y += 1
-            elif (
                 current_y < self.game_grid_height - 1
                 and self.game_grid[current_y + 1][current_x] != WALL_CELL_STATE_CODE
             ):
@@ -230,13 +231,31 @@ class Trainer:
             )
         else:
             parallel_evaluator = ParallelEvaluator(
-                6,
+                3,
                 functools.partial(
                     eval_genomes_no_display, trainer=self, player_moves=player_moves
                 ),
             )
 
-            population.run(parallel_evaluator.evaluate, generations)
+            winner = population.run(parallel_evaluator.evaluate, generations)
+
+            node_names = {
+                -1: "Enemy X",
+                -2: "Enemy Y",
+                -3: "Enemy Index",
+                -4: "Player X",
+                -5: "Player Y",
+                -6: "Player Health",
+                0: "Move Left",
+                1: "Move Right",
+                2: "Move Up",
+                3: "Move Down",
+                4: "Stand Still",
+                5: "Shoot Player",
+                6: "Hit Player",
+            }
+
+            visualize.draw_net(self.neat_config, winner, True, node_names=node_names)
 
     def play_game_no_display(
         self, genome, config, player_moves: list[list[tuple[int, int]]]
@@ -260,16 +279,18 @@ class Trainer:
 
                 for enemy_index, (enemy_x, enemy_y) in enumerate(enemy_positions):
                     network_inputs = [
+                        (enemy_x + 1) / self.game_grid_width,
+                        (enemy_y + 1) / self.game_grid_height,
                         (enemy_index + 1) / len(enemy_positions),
                         (player_x + 1) / self.game_grid_width,
                         (player_y + 1) / self.game_grid_height,
                         player_health / PLAYER_STARTING_HEALTH,
                     ]
 
-                    for (
-                        x,
-                        y,
-                    ) in enemy_positions:
+                    for i, (x, y) in enumerate(enemy_positions):
+                        if i == enemy_index:
+                            continue
+
                         network_inputs.append((x + 1) / self.game_grid_width)
                         network_inputs.append((y + 1) / self.game_grid_height)
 
@@ -354,12 +375,15 @@ class Trainer:
                     if enemy_positions[enemy_index] != [enemy_x, enemy_y]:
                         genome.fitness += 0.1
 
-                    enemy_positions[enemy_index] = [enemy_x, enemy_y]  # type: ignore
+                        if math.sqrt(
+                            (player_x - enemy_x) ** 2 + (player_y - enemy_y) ** 2
+                        ) < math.sqrt(
+                            (player_x - enemy_positions[enemy_index][0]) ** 2
+                            + (player_y - enemy_positions[enemy_index][1]) ** 2
+                        ):
+                            genome.fitness += 1
 
-                    genome.fitness -= (
-                        math.sqrt((player_x - enemy_x) ** 2 + (player_y - enemy_y) ** 2)
-                        / MAX_PLAYER_MOVES**2
-                    )
+                    enemy_positions[enemy_index] = [enemy_x, enemy_y]  # type: ignore
 
                     if player_health <= 0:
                         break
@@ -407,7 +431,7 @@ class Trainer:
             moves_made = 0
 
             for player_x, player_y in moves:
-                clock.tick(20)
+                clock.tick(10)
                 moves_made += 1
 
                 window.fill((255, 255, 255))
@@ -450,16 +474,18 @@ class Trainer:
 
                 for enemy_index, (enemy_x, enemy_y) in enumerate(enemy_positions):
                     network_inputs = [
+                        (enemy_x + 1) / self.game_grid_width,
+                        (enemy_y + 1) / self.game_grid_height,
                         (enemy_index + 1) / len(enemy_positions),
                         (player_x + 1) / self.game_grid_width,
                         (player_y + 1) / self.game_grid_height,
                         player_health / PLAYER_STARTING_HEALTH,
                     ]
 
-                    for (
-                        x,
-                        y,
-                    ) in enemy_positions:
+                    for i, (x, y) in enumerate(enemy_positions):
+                        if i == enemy_index:
+                            continue
+
                         network_inputs.append((x + 1) / self.game_grid_width)
                         network_inputs.append((y + 1) / self.game_grid_height)
 
@@ -541,6 +567,17 @@ class Trainer:
                             if distance_to_player <= 1:
                                 player_health -= ENEMY_HIT_DAMAGE
 
+                    if enemy_positions[enemy_index] != [enemy_x, enemy_y]:
+                        genome.fitness += 0.1
+
+                        if math.sqrt(
+                            (player_x - enemy_x) ** 2 + (player_y - enemy_y) ** 2
+                        ) < math.sqrt(
+                            (player_x - enemy_positions[enemy_index][0]) ** 2
+                            + (player_y - enemy_positions[enemy_index][1]) ** 2
+                        ):
+                            genome.fitness += 1
+
                     enemy_positions[enemy_index] = [enemy_x, enemy_y]  # type: ignore
 
                     if player_health <= 0:
@@ -558,7 +595,29 @@ class Trainer:
                         ),
                     )
 
+                    distance = math.sqrt(
+                        (player_x - enemy_x) ** 2 + (player_y - enemy_y) ** 2
+                    )
+
+                    text = font.render(str(round(distance, 1)), True, (0, 0, 0))
+                    text_rect = text.get_rect(
+                        center=(
+                            cell_size * enemy_x + cell_size // 2,
+                            cell_size * enemy_y + cell_size // 2,
+                        )
+                    )
+                    grid_surface.blit(text, text_rect)
+
                 window.blit(grid_surface, grid_rect)
+
+                text = font.render(f"Fitness: {genome.fitness}", True, (0, 0, 0))
+                text_rect = text.get_rect(
+                    center=(
+                        400,
+                        25,
+                    )
+                )
+                window.blit(text, text_rect)
 
                 pygame.display.update()
 

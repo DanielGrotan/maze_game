@@ -7,7 +7,7 @@ def main():
     # level_editor.run()
 
     trainer = Trainer("neat-config", "training_output", "grid.json")
-    trainer.train(True, generations=10000)
+    trainer.train(False, generations=10000)
 
 
 if __name__ == "__main__":
